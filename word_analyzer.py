@@ -4,104 +4,96 @@ import json
 import csv
 from collections import Counter
 
-def load_stopwords(file_path):
-    try:
-        with open(file_path, 'r', encoding='utf-8') as f:
-            return set(line.strip().lower() for line in f)
-    except FileNotFoundError:
-        return set()
+# 1. STOPWORDS & FILTRARE
+STOPWORDS_RO = {'și', 'de', 'pentru', 'că', 'un', 'o', 'la', 'în', 'pe', 'cu', 'din', 'să', 'este'}
+STOPWORDS_EN = {'the', 'and', 'to', 'of', 'a', 'in', 'is', 'it', 'you', 'that', 'for', 'on'}
 
 def clean_text(text):
-    # Eliminăm punctuația și convertim în lowercase
+    # TOKENIZARE ȘI NORMALIZARE
     text = text.lower()
-    words = re.findall(r'\b\w+\b', text)
-    return words
+    return re.findall(r'\b\w+\b', text)
 
-def get_ngrams(words, n):
-    return [" ".join(words[i:i+n]) for i in range(len(words)-n+1)]
+def get_stats(words):
+    # LUNGIME MEDIE ȘI DIVERSITATE
+    if not words: return 0, 0, 0
+    unique = set(words)
+    avg_len = sum(len(w) for w in words) / len(words)
+    ttr = len(unique) / len(words) # Type-Token Ratio
+    return avg_len, len(unique), ttr
 
-def analyze_text(file_path, stop_words=None, top_n=10, n_gram_size=1):
-    try:
-        with open(file_path, 'r', encoding='utf-8') as f:
-            content = f.read()
-    except Exception as e:
-        print(f"Eroare la citirea fișierului: {e}")
-        return
+def generate_word_cloud_text(counter, limit=15):
+    # GENERARE WORD CLOUD (TEXT)
+    print("\n--- WORD CLOUD (TEXT) ---")
+    max_freq = counter.most_common(1)[0][1] if counter else 1
+    for word, freq in counter.most_common(limit):
+        size = int((freq / max_freq) * 10) + 1
+        print(f"{word.upper() if size > 5 else word} {'*' * size}")
 
-    all_words = clean_text(content)
-    filtered_words = [w for w in all_words if w not in (stop_words or set())]
+def run_analysis(file_path, n_gram=1, top_n=10, export=None):
+    with open(file_path, 'r', encoding='utf-8') as f:
+        text = f.read()
     
-    if n_gram_size > 1:
-        tokens = get_ngrams(filtered_words, n_gram_size)
-        label = f"Top {top_n} {n_gram_size}-grame"
+    all_words = clean_text(text)
+    # FILTRARE STOPWORDS
+    filtered = [w for w in all_words if w not in STOPWORDS_RO and w not in STOPWORDS_EN]
+    
+    # N-GRAMS (BIGRAME, TRIGRAME)
+    if n_gram > 1:
+        tokens = [" ".join(all_words[i:i+n_gram]) for i in range(len(all_words)-n_gram+1)]
     else:
-        tokens = filtered_words
-        label = f"Top {top_n} cuvinte (fără stopwords)"
+        tokens = filtered
 
-    count = Counter(tokens)
-    total = len(tokens)
+    counts = Counter(tokens)
+    top_results = counts.most_common(top_n)
     
-    print(f"\n{label}:")
-    for i, (word, freq) in enumerate(count.most_common(top_n), 1):
-        percentage = (freq / total) * 100 if total > 0 else 0
-        print(f"{i}. {word:<15} - {freq} apariții ({percentage:.2f}%)")
+    # AFIȘARE REZULTATE
+    print(f"\nAnaliză: {file_path} ({len(all_words)} cuvinte)")
+    for i, (item, freq) in enumerate(top_results, 1):
+        print(f"{i}. {item}: {freq}")
 
-def show_diversity(file_path):
+    # EXPORT JSON/CSV
+    if export == 'json':
+        with open('results.json', 'w') as f: json.dump(dict(top_results), f)
+    elif export == 'csv':
+        with open('results.csv', 'w', newline='') as f:
+            writer = csv.writer(f)
+            writer.writerows(top_results)
+
+    return all_words, counts
+
+def compare_docs(file1, file2):
+    # COMPARAȚIE ÎNTRE DOCUMENTE
+    words1 = set(clean_text(open(file1, 'r', encoding='utf-8').read()))
+    words2 = set(clean_text(open(file2, 'r', encoding='utf-8').read()))
+    common = words1.intersection(words2)
+    print(f"\nComparație: {len(common)} cuvinte comune între fișiere.")
+
+def search_concordance(file_path, keyword):
+    # CĂUTARE CONTEXT (CONCORDANȚĂ)
     with open(file_path, 'r', encoding='utf-8') as f:
-        content = f.read()
-    words = clean_text(content)
-    unique_words = set(words)
-    ttr = len(unique_words) / len(words) if words else 0
-    avg_len = sum(len(w) for w in words) / len(words) if words else 0
-    
-    print(f"\nDiversitate vocabular:")
-    print(f"Total cuvinte: {len(words)}")
-    print(f"Cuvinte unice: {len(unique_words)} ({len(unique_words)/len(words)*100:.1f}%)")
-    print(f"Type-Token Ratio: {ttr:.3f}")
-    print(f"Lungime medie cuvânt: {avg_len:.1f} caractere")
-
-def concordance(file_path, target_word):
-    with open(file_path, 'r', encoding='utf-8') as f:
-        lines = f.readlines()
-    
-    print(f"\nConcordanță pentru '{target_word}':")
-    count = 0
-    for line in lines:
-        if target_word.lower() in line.lower():
-            count += 1
-            # Curățăm puțin linia pentru afișare
-            clean_line = line.strip()
-            highlighted = clean_line.lower().replace(target_word.lower(), f"*{target_word}*")
-            print(f"{count}. ...{highlighted}...")
+        content = f.read().lower()
+    matches = re.findall(r'(.{0,30}' + re.escape(keyword.lower()) + r'.{0,30})', content)
+    print(f"\nConcordanță pentru '{keyword}':")
+    for m in matches[:5]: print(f"...{m}...")
 
 def main():
-    # Exemplu de parsare simplă a argumentelor (pentru demo)
     args = sys.argv[1:]
+    if not args: return
     
-    if not args:
-        print("Utilizare: python word_analyzer.py <fisier.txt> [--top N] [--diversity] [--ngrams N] [--concordance WORD]")
-        return
-
-    file_path = args[0]
+    f1 = args[0]
     
-    # Parametri default
-    top_n = 10
-    n_gram_size = 1
-    stop_words = set(['și', 'de', 'pentru', 'că', 'un', 'o', 'la', 'în', 'pe']) # Stopwords de bază RO
-
-    if "--top" in args:
-        top_n = int(args[args.index("--top") + 1])
-    
-    if "--ngrams" in args:
-        n_gram_size = int(args[args.index("--ngrams") + 1])
-
-    if "--diversity" in args:
-        show_diversity(file_path)
+    if "--compare" in args:
+        compare_docs(f1, args[args.index("--compare") + 1])
     elif "--concordance" in args:
-        word = args[args.index("--concordance") + 1]
-        concordance(file_path, word)
+        search_concordance(f1, args[args.index("--concordance") + 1])
+    elif "--diversity" in args:
+        w = clean_text(open(f1, 'r', encoding='utf-8').read())
+        avg, uniq, ttr = get_stats(w)
+        print(f"Diversitate: {ttr:.3f}, Lungime medie: {avg:.2f}")
     else:
-        analyze_text(file_path, stop_words, top_n, n_gram_size)
+        # Implicit: Top frecvență și Word Cloud
+        words, counts = run_analysis(f1)
+        generate_word_cloud_text(counts)
 
 if __name__ == "__main__":
     main()
